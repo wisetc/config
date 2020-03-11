@@ -1,0 +1,103 @@
+image: wisetc/cnode:8
+
+before_script:
+  - node -v
+stages:
+  - test
+  - deploy
+  - notify
+  - sync_staging
+
+cache:
+  key: app-react-0x
+  paths:
+    - node_modules/
+  untracked: true
+
+test:
+  stage: test
+  script:
+    - cnpm i
+    - npm test
+  only:
+    - /^dev.*/
+    - test
+    - /^v.*\d$/
+    - master
+  tags:
+    - node
+
+# 发布到内网开发环境
+deploy_dev:
+  stage: deploy
+  script:
+    - cnpm i
+    - sh scripts/deploy.dev.local.sh
+  only:
+    - /^dev.*/
+  tags:
+    - local
+    - node
+
+# 发布到内网预览环境
+deploy_staging:
+  stage: deploy
+  script:
+    - cnpm i
+    - sh scripts/deploy.test.local.sh
+  variables:
+    REACT_APP_HAS_VCONSOLE: "yes"
+  only:
+    - test
+  tags:
+    - local
+    - node
+
+# 发布到生产环境
+deploy:
+  stage: deploy
+  before_script:
+    - hostname
+  script:
+    - cnpm i
+    - npm run build
+    - ls -lh build
+    - sh scripts/sync.sh
+    - node scripts/save_build.prod.js
+  only:
+    - master
+  tags:
+    - node
+    - production
+
+# 发送部署结果邮件
+notify:
+  stage: notify
+  before_script:
+    - hostname
+  script:
+    - node scripts/notify.js
+  only:
+    - master
+  tags:
+    - node
+
+# 同步当前job对应分支的代码到test分支
+sync_staging:
+  stage: sync_staging
+  allow_failure: true
+  before_script:
+    - git remote -v
+    - git config --global user.email "$GITLAB_PUSH_EMAIL"
+    - git config --global user.name "GitLab CI"
+  script:
+    - git fetch
+    - git checkout test
+    - git pull origin test
+    - git merge -
+    - git checkout -
+    - git push $(echo "$CI_REPOSITORY_URL" | sed -r "s/:\/\/.+:.+@/:\/\/$GITLAB_PUSH_ACCOUNT@/g") test
+  only:
+    - master
+  tags:
+    - node
